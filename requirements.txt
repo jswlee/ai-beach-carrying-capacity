@@ -1,0 +1,38 @@
+# Unified environment for ai-beach-carrying-capacity
+# Python 3.11. CUDA 12.8 PyTorch wheels via the pytorch index below.
+# Install:  python -m venv venv && venv\Scripts\activate && pip install -r requirements.txt
+# (CPU-only install: drop the torch pins' +cu128 suffix or omit the extra-index-url.)
+
+--extra-index-url https://download.pytorch.org/whl/cu128
+
+# --- deep learning ---
+torch==2.9.0+cu128
+torchvision==0.24.0+cu128
+transformers==4.57.1
+ultralytics==8.4.60
+onnxruntime>=1.19
+safetensors>=0.5
+tokenizers>=0.22
+huggingface-hub>=0.34
+
+# --- data / images ---
+numpy>=1.24,<3
+pandas>=2.1
+opencv-python==4.10.0.84
+pillow>=10
+pillow-avif-plugin>=1.5
+scikit-learn>=1.5
+datasets>=4.0
+
+# --- viz / notebook ---
+matplotlib>=3.8
+jupyter
+nbformat
+ipykernel
+
+# --- misc ---
+tqdm>=4.66
+requests>=2.31
+requests-toolbelt
+python-dotenv>=1.0
+PyYAML>=6.0

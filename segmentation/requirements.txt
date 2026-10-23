@@ -1,0 +1,13 @@
+opencv-python
+numpy
+ultralytics
+huggingface-hub
+transformers
+torchvision
+datasets
+accelerate
+Pillow
+roboflow
+scikit-learn
+torch-cuda
+sahi

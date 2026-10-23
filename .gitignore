@@ -1,0 +1,21 @@
+# Python env + caches
+venv/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# Regenerable outputs (figures are rebuilt by the notebook; copies needed
+# by PAPER.md live in figures/)
+analysis/out/
+
+# Large derived arrays / model artifacts (regenerable)
+*.npy
+*.pt
+*.onnx
+*.onnx.data
+*.safetensors
+
+# OS / editor
+Thumbs.db
+.DS_Store
+.vscode/
