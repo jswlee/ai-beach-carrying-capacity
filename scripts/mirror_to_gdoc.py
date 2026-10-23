@@ -24,6 +24,9 @@ MD_PATH = os.path.join(REPO, 'PAPER.md')
 HERMES_HOME = os.path.expandvars(r'$LOCALAPPDATA/hermes')
 TOKEN_PATH = os.path.join(HERMES_HOME, 'google_token.json')
 
+GDRIVE_FOLDER = 'PAPER-MIRROR-IMAGES'
+SIDECAR = os.path.join(REPO, 'scripts', 'gdrive_images.json')
+
 MAX_WIDTH_PT = 432.0   # 6 in
 MAX_HEIGHT_PT = 384.0  # ~5.3 in
 BATCH_REQ_LIMIT = 80
@@ -225,11 +228,13 @@ def image_object_size(path):
 # ------------------------------------------------------------- request build --
 HEADING_MAP = {'h1': 'TITLE', 'h2': 'HEADING_1', 'h3': 'HEADING_2',
                'h4': 'HEADING_3', 'h5': 'HEADING_4', 'h6': 'HEADING_5'}
+# NB: the Docs API JSON field is `fontFamily` (NOT the proto's short_name);
+# `shortName` is rejected with "Cannot find field".
 TNR = {'weightedFontFamily': {'fontFamily': 'Times New Roman', 'weight': 400}}
 COURIER = {'weightedFontFamily': {'fontFamily': 'Courier New', 'weight': 400}}
 
 
-def build_requests(blocks, repo):
+def build_requests(blocks, repo, image_uris):
     """Deterministically compute all batchUpdate requests.
     Returns (batches, cursor_end, code_ranges) where batches is a list of
     (tag, [requests]); all indices are final-document coordinates."""
@@ -237,12 +242,30 @@ def build_requests(blocks, repo):
     code_ranges = []
     cursor = 1  # position of the '\n' of the initial empty paragraph
 
-    def style_runs(base, runs):
+    def style_runs(base, runs, text_len, font=TNR, include_nl=False):
+        """Apply font (plus any bold/italic runs) over the whole text.
+
+        Fonts are set per run at creation time. A masked document-wide
+        updateTextStyle applied afterwards CLEARS the non-masked character
+        styles (bold/italic) on the runs it touches (verified empirically
+        2026-10-22), so there is deliberately no final font pass.
+        """
+        end = text_len + (1 if include_nl else 0)
+        segs = []
+        pos = 0
         for s, e, st in runs:
+            if s > pos:
+                segs.append((pos, s, dict(font)))
+            d = dict(font)
+            d.update(st)
+            segs.append((s, e, d))
+            pos = e
+        if pos < end:
+            segs.append((pos, end, dict(font)))
+        for s, e, d in segs:
             reqs.append({'updateTextStyle': {
                 'range': {'startIndex': base + s, 'endIndex': base + e},
-                'textStyle': st,
-                'fields': ','.join(st.keys())}})
+                'textStyle': d, 'fields': ','.join(d.keys())}})
 
     for kind, data in blocks:
         reqs = []
@@ -255,34 +278,32 @@ def build_requests(blocks, repo):
                 'range': {'startIndex': cursor, 'endIndex': cursor + L},
                 'paragraphStyle': {'namedStyleType': HEADING_MAP[kind]},
                 'fields': 'namedStyleType'}})
-            style_runs(cursor, runs)
+            style_runs(cursor, runs, len(plain), include_nl=True)
             cursor += L
         elif kind == 'para':
             plain, runs = render_inline(data)
             L = len(plain) + 1
             reqs.append({'insertText': {'location': {'index': cursor}, 'text': plain + '\n'}})
-            style_runs(cursor, runs)
+            style_runs(cursor, runs, len(plain), include_nl=True)
             cursor += L
         elif kind == 'img':
             alt, src = data
             path = os.path.join(repo, src)
-            b64 = base64.b64encode(open(path, 'rb').read()).decode()
-            mime = image_size(path)[2]
-            uri = 'data:%s;base64,%s' % (mime, b64)
+            uri = image_uris[src]
             size = image_object_size(path)
-            # new empty para, image in it, then caption para
-            reqs.append({'insertText': {'location': {'index': cursor}, 'text': '\n'}})
+            # image in the open para, newline ends that para, caption below
             reqs.append({'insertInlineImage': {
-                'location': {'index': cursor + 1}, 'uri': uri, 'objectSize': size}})
+                'location': {'index': cursor}, 'uri': uri, 'objectSize': size}})
+            reqs.append({'insertText': {'location': {'index': cursor + 1}, 'text': '\n'}})
             reqs.append({'updateParagraphStyle': {
-                'range': {'startIndex': cursor + 1, 'endIndex': cursor + 3},
+                'range': {'startIndex': cursor, 'endIndex': cursor + 2},
                 'paragraphStyle': {'alignment': 'CENTER'}, 'fields': 'alignment'}})
             cap = alt
             cstart = cursor + 2
             reqs.append({'insertText': {'location': {'index': cstart}, 'text': cap + '\n'}})
             reqs.append({'updateTextStyle': {
                 'range': {'startIndex': cstart, 'endIndex': cstart + len(cap)},
-                'textStyle': {'italic': True}, 'fields': 'italic'}})
+                'textStyle': {'italic': True, **TNR}, 'fields': 'italic,weightedFontFamily'}})
             reqs.append({'updateParagraphStyle': {
                 'range': {'startIndex': cstart, 'endIndex': cstart + len(cap) + 1},
                 'paragraphStyle': {'alignment': 'CENTER'}, 'fields': 'alignment'}})
@@ -300,10 +321,11 @@ def build_requests(blocks, repo):
                     cell = row[c] if c < len(row) else ''
                     plain, runs = render_inline(cell)
                     pos = cursor + 4 + 2 * (r * C + c) + r + off
-                    reqs.append({'insertText': {'location': {'index': pos}, 'text': plain}})
-                    style_runs(pos, runs)
+                    if plain:
+                        reqs.append({'insertText': {'location': {'index': pos}, 'text': plain}})
+                        style_runs(pos, runs, len(plain))
                     off += len(plain)
-            cursor += 1 + footprint
+            cursor += 1 + footprint + off
         elif kind in ('list_num', 'list_bullet'):
             items = data
             start = cursor
@@ -311,7 +333,7 @@ def build_requests(blocks, repo):
                 plain, runs = render_inline(item)
                 L = len(plain) + 1
                 reqs.append({'insertText': {'location': {'index': cursor}, 'text': plain + '\n'}})
-                style_runs(cursor, runs)
+                style_runs(cursor, runs, len(plain), include_nl=True)
                 cursor += L
             preset = ('NUMBERED_DECIMAL_ALPHA_ROMAN' if kind == 'list_num'
                       else 'BULLET_DISC_CIRCLE_SQUARE')
@@ -321,22 +343,17 @@ def build_requests(blocks, repo):
             text = '\n'.join(data) + '\n'
             L = len(text)
             reqs.append({'insertText': {'location': {'index': cursor}, 'text': text}})
+            style_runs(cursor, [], L, font=COURIER)
             cursor += L
             code_ranges.append((cursor - L, cursor - 1))
         else:
             raise ValueError('unknown block %r' % kind)
         units.append((kind, reqs))
 
-    # final font pass: Times New Roman everywhere, then Courier over code ranges
-    final = []
-    final.append(('font-tnr', [{'updateTextStyle': {
-        'range': {'startIndex': 1, 'endIndex': cursor + 1},
-        'textStyle': TNR, 'fields': 'weightedFontFamily'}}]))
-    for s, e in code_ranges:
-        final.append(('font-code', [{'updateTextStyle': {
-            'range': {'startIndex': s, 'endIndex': e + 1},
-            'textStyle': COURIER, 'fields': 'weightedFontFamily'}}]))
-    units.extend(final)
+    # NOTE: no document-wide font pass. A masked updateTextStyle applied
+    # over a range that spans styled runs CLEARS the non-masked character
+    # styles (bold/italic) on the runs it touches (verified empirically
+    # 2026-10-22), so fonts are applied per run inside style_runs() above.
 
     # pack units into batches (each image unit gets its own batch)
     batches = []
@@ -370,8 +387,68 @@ def make_services():
                         client_id=tok['client_id'], client_secret=tok['client_secret'],
                         scopes=tok['scopes'])
     docs = build('docs', 'v1', credentials=creds, cache_discovery=False).documents()
-    drive = build('drive', 'v3', credentials=creds, cache_discovery=False).files()
+    drive = build('drive', 'v3', credentials=creds, cache_discovery=False)
     return docs, drive
+
+
+def ensure_folder(drive):
+    """Find or create the Drive folder that holds mirror figure uploads."""
+    found = drive.files().list(
+        q="name='%s' and trashed=false" % GDRIVE_FOLDER,
+        fields='files(id,name)', spaces='drive', pageSize=10).execute()
+    if found['files']:
+        return found['files'][0]['id']
+    return drive.files().create(
+        body={'name': GDRIVE_FOLDER, 'mimeType': 'application/vnd.google-apps.folder'},
+        fields='id').execute()['id']
+
+
+def ensure_image_uris(blocks, drive):
+    """Upload figures to Drive (link-shared) and return {src: public_url}.
+
+    Sidecar gdrive_images.json caches fileId+size+mtime per src so reruns
+    skip unchanged files. Uploads are deleted when a file changes.
+    Images must be publicly fetchable by the Docs API, so each file gets an
+    'anyone with the link' reader permission (user's own figures).
+    """
+    from googleapiclient.http import MediaFileUpload
+    side = {}
+    if os.path.exists(SIDECAR):
+        side = json.load(open(SIDECAR))
+    images = side.setdefault('images', {})
+    if 'folderId' not in side:
+        side['folderId'] = ensure_folder(drive)
+    folder = side['folderId']
+    uris = {}
+    for kind, data in blocks:
+        if kind != 'img':
+            continue
+        alt, src = data
+        if src in uris:
+            continue
+        path = os.path.join(REPO, src)
+        st = os.stat(path)
+        entry = images.get(src)
+        if entry and entry.get('size') == st.st_size and entry.get('mtime') == int(st.st_mtime):
+            uris[src] = entry['uri']
+            continue
+        if entry:  # changed locally — drop the stale Drive copy
+            try:
+                drive.files().delete(fileId=entry['fileId']).execute()
+            except Exception as e:
+                print('  (could not delete stale %s: %s)' % (src, e))
+        r = drive.files().create(
+            body={'name': os.path.basename(src), 'parents': [folder]},
+            media_body=MediaFileUpload(path, mimetype=None, resumable=True),
+            fields='id, webContentLink').execute()
+        drive.permissions().create(fileId=r['id'], body={'type': 'anyone', 'role': 'reader'},
+                                   fields='id').execute()
+        images[src] = {'fileId': r['id'], 'size': st.st_size, 'mtime': int(st.st_mtime),
+                       'uri': r['webContentLink']}
+        uris[src] = r['webContentLink']
+        print('  uploaded %s -> %s' % (src, r['id']))
+    json.dump(side, open(SIDECAR, 'w'), indent=1)
+    return uris
 
 
 def body_cursor(docs):
@@ -384,8 +461,7 @@ def clear_doc(docs):
     c = body_cursor(docs)
     if c > 1:
         docs.batchUpdate(documentId=DOC_ID, body={'requests': [
-            {'deleteContentRange': {'range': {'startIndex': 1, 'endIndex': c},
-                                    'type': 'RESTART_NUMBERING'}}]}).execute()
+            {'deleteContentRange': {'range': {'startIndex': 1, 'endIndex': c}}}]}).execute()
 
 
 def main():
@@ -395,7 +471,14 @@ def main():
 
     md = open(MD_PATH, encoding='utf-8').read()
     blocks = parse_blocks(md)
-    batches, cursor_end, code_ranges = build_requests(blocks, REPO)
+
+    docs = drive = None
+    if args.dry_run:
+        image_uris = {data[1]: 'https://placeholder.invalid/x' for k, data in blocks if k == 'img'}
+    else:
+        docs, drive = make_services()
+        image_uris = ensure_image_uris(blocks, drive)
+    batches, cursor_end, code_ranges = build_requests(blocks, REPO, image_uris)
 
     n_img = sum(1 for k, _ in blocks if k == 'img')
     n_tbl = sum(1 for k, _ in blocks if k == 'table')
@@ -409,7 +492,6 @@ def main():
             print('  batch(%d): %s' % (len(b), sorted({next(iter(r)) for r in b})))
         return
 
-    docs, drive = make_services()
     title = blocks[0][1] if blocks[0][0] == 'h1' else 'Beach Carrying Capacity'
     clear_doc(docs)
     cursor = 1
@@ -427,9 +509,13 @@ def main():
 
     d = docs.get(documentId=DOC_ID).execute()
     n_inline = len(d.get('inlineObjects', {}))
-    print('inline images in doc: %d' % n_inline)
+    n_obj_refs = json.dumps(d['body']).count('inlineObjectElement')
+    print('inline images in doc: %d (objects: %d, refs in body: %d)'
+          % (n_inline, n_inline, n_obj_refs))
+    print('expected images: %d %s'
+          % (n_img, 'OK' if n_inline == n_img else 'MISMATCH!'))
 
-    drive.patch(fileId=DOC_ID, body={'name': title}, fields='name').execute()
+    drive.files().update(fileId=DOC_ID, body={'name': title}, fields='name').execute()
     print('drive title set: %s' % title)
     print('DONE')
 

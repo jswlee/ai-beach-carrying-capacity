@@ -19,3 +19,8 @@ analysis/out/
 Thumbs.db
 .DS_Store
 .vscode/
+
+# cron mirror state (hash of last successfully mirrored PAPER.md)
+.mirror_state.json
+
+scripts/

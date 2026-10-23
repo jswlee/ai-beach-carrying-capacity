@@ -31,32 +31,122 @@ segmentation; object detection; SegFormer; YOLO; Hawaiʻi.
 
 ## 1. Introduction
 
-Beach carrying capacity — the number of visitors a shore can accommodate
-before crowding or ecological stress degrades the resource — is conventionally
-estimated from intermittent human counts, aerial surveys, or parking-lot
-proxies. These are expensive, sparse in time, and blind to the spatial
-allocation that matters most: how many people are *on the sand* versus *in the
-water*, and how the usable beach area itself changes with tide and season.
+Beaches are heavily used public spaces where patterns of human occupancy
+shift in response to environmental conditions, recreation, and coastal
+hazards, yet continuous measurements of beach use are difficult to obtain.
+Carrying capacity — the level of use a shore can absorb before crowding,
+erosion, habitat degradation, or safety risks degrade the resource — is
+therefore central to coastal management, and the quantities that decide it
+are occupancy metrics: visitor density, area per visitor, duration of stay,
+and the temporal distribution of use (Schlacher et al., 2008; Ruyck et al.,
+1997). Today these metrics are estimated from intermittent human counts,
+aerial surveys, or parking-lot proxies: expensive, temporally sparse, and
+blind to the *spatial allocation* that matters most for carrying-capacity
+management — how many people are *on the sand* versus *in the water* at any
+moment, and how the usable beach area itself shifts with tide and season.
+The urgency of measuring this continuously is growing. As coastal populations
+have grown, so has recreation and tourism in nearshore zones, driving
+increasing demand on the ecosystem services these systems provide (Reimann
+et al., 2023; Lansu et al., 2024), while land-use change in the intertidal
+and subtidal zones has produced coastal squeeze (Martínez et al., 2007; Silva
+et al., 2020) and the ecological footprint of coastal tourism — pollution,
+waste, habitat disturbance, and noise — continues to degrade the very
+resources that make beaches attractive (Nienaber and Imrie-Kuzu, 2025).
 
-This paper demonstrates that a single fixed webcam plus two modest
-deep-learning models suffice to compute these quantities continuously. Our
-contributions are:
+Beaches are complex socio-ecological systems in which human activity,
+geomorphology, and ecology interact, and which require monitoring of both
+environmental conditions and visitor occupancy to inform adaptive management
+(Silva et al., 2020). The stakes of mis-estimating occupancy are concrete:
+crowding can degrade the visitor experience and accelerate the erosion of
+dunes and the waterline (Epelde et al., 2021; Arnold et al., 2016), while
+the zoning, timed-entry, and seasonal-restriction decisions that depend on
+use data are often made without data at the required spatial and temporal
+resolution (Morgan et al., 2012; Pathak et al., 2021). Traditional monitoring
+approaches — staffed counts, aerial surveys, and questionnaires — are
+labor-intensive and temporally sparse (Roig Munar et al., 2012), and recent
+work has stressed the need for continuous, fine-grained occupancy metrics to
+capture the temporal dynamics of recreational beach use (Johnston-González
+et al., 2024; Sempere-Tortosa et al., 2024).
 
-1. **A fused segmentation–detection methodology** in which both models are
-   fed byte-identical masked frames, so that person detections can be assigned
-   a location class (beach / water / other) by sampling the semantic mask at
-   the box's foot point.
-2. **A 9.5-month, 12,035-frame longitudinal record** of beach occupancy at
-   Kāʻanapali Beach, Maui, including a verification that both models observed
-   exactly the same frames.
-3. **First-draft carrying-capacity metrics**: beach area per capita (in image
-   units, with a provisional metric conversion), occupancy time series, and
-   temperature-conditioned water usage.
+Monitoring of beach use has followed a predictable progression. Early studies
+relied on manual counts of people and waves, which are labor-intensive and
+difficult to sustain over time (Boak and Turner, 2005; Kim et al., 2020;
+Lippmann and Holman, 1989), and Provost et al. (2019) have highlighted the
+need for continuous, automated occupancy measurement to resolve these
+constraints. The next step was fixed-camera observation: Balouin et al.
+(2014) automated beach-attendance assessment from video at the Lido of Sète,
+France, and Johnston-González et al. (2024) later applied machine-learning
+models to a fixed webcam at El Rodadero, Colombia. Kammler and Schernewski
+(2004) analyzed the spatial and temporal patterns of beach tourism from
+webcam imagery, and Provost et al. (2019) quantified beach users across a
+range of environmental conditions with drones. More recently, coastal
+videometry has emerged as a practical tool for monitoring human activity,
+sandbar dynamics, and nearshore hazards (Dumitriu et al., 2023; Maji et al.,
+2022), with semantic segmentation and object detection now core components
+of coastal monitoring systems (Dumitriu et al., 2023; Maji et al., 2022).
+This line of work motivates the present study, in which a lightweight
+computer-vision system built on two off-the-shelf model families turns a
+single publicly streaming beach webcam into a continuous carrying-capacity
+sensor.
 
-The thesis is deliberately modest: these are *simple* models and commodity
-data. The value is in the rigor of the pipeline — shared masking, a verified
-night gate, dense (hole-free) segmentation, and an auditable per-detection
-CSV — which makes the derived analytics trustworthy enough to build on.
+Counting people from a fixed, high-vantage beach webcam is a tiny-object
+detection problem: at this scale people occupy only a handful of pixels, and
+the standard feature levels of a detector are too coarse to resolve them
+reliably. Tiny-object detection remains one of the most challenging areas in
+computer vision (Zou et al., 2023; Muzammul and Li, 2025), and the practical
+constraint for a 24/7 fixed node is that the whole system must run
+continuously on a single machine, which favors lightweight, edge-deployable
+architectures (Akyon et al., 2022). We therefore combine two such model
+families. For detection, YOLO26 (Jocher et al., 2026) is configured with a
+stride-4 (P2) head added to its feature pyramid (Lin et al., 2017),
+recovering the fine-grained resolution that small person boxes require (Yu
+et al., 2019). For segmentation, a transformer-based segmenter (SegFormer;
+Xie et al., 2021) produces a dense beach/water/background class map that
+resolves the waterline directly from pixels, without the tile-boundary
+artifacts and coverage holes that affect tiled instance segmentation in this
+regime. Fusing the two at each detection's foot point assigns every detected
+person a location class — on the beach, in the water, or elsewhere — which
+is exactly the spatial allocation that carrying-capacity metrics require.
+
+The objective of this work is to quantify continuous beach occupancy and
+carrying-capacity indicators at Kāʻanapali Beach, Maui, from a single fixed
+webcam. Specifically, we (i) detect people in every usable frame with a
+tiny-object person detector, (ii) segment the same frame into beach, water,
+and background, and (iii) fuse the two to produce per-frame counts of people
+on the sand, in the water, and elsewhere — over a 9.5-month record, at
+15-minute resolution. Joined with public tide and meteorological data, these
+counts yield beach area per capita, diurnal and seasonal occupancy curves,
+and temperature-conditional water use: the quantities a carrying-capacity
+assessment of this beach requires.
+
+Our contributions are:
+
+1. **A fused segmentation–detection framework** that unifies person
+   detection and semantic segmentation on a single fixed camera: both models
+   consume byte-identical pixel-masked frames, so every person detection is
+   assigned a spatiotemporally aligned location class (beach / water / other)
+   by sampling the semantic mask at the box's foot point.
+2. **A dual-task annotation dataset** supporting both a tiny-object person
+   detector and a dense waterline segmenter: 1,375 images with 16,599 person
+   boxes and 175 segmentation frames, with a missing-label policy that treats
+   unannotated backgrounds as unknown rather than negative (Xu et al., 2019),
+   and held-out test validation for both tasks.
+3. **A 9.5-month, 12,035-frame longitudinal record** of beach occupancy at
+   Kāʻanapali Beach (Jan 5 – Oct 20, 2026, 15-minute cadence), demonstrating
+   that a lightweight, edge-deployable pipeline can operate continuously
+   across the storm events, rainfall, and seasonal temperature range of the
+   record — including a verification that both models observed exactly the
+   same frames.
+4. **First-draft carrying-capacity indicators** for the site — beach area
+   per capita, diurnal and seasonal occupancy curves, temperature-conditional
+   water use, and water use during brown-water advisories — establishing a
+   baseline for continuous, remote measurement of coastal use.
+
+The approach is deliberately modest: commodity hardware and off-the-shelf
+model families, with no bespoke sensors. The value is in the rigor of the
+pipeline — shared masking, a verified night gate, dense segmentation, and an
+auditable per-detection record — which makes the derived carrying-capacity
+indicators trustworthy enough to build on.
 
 ## 2. Site and data
 
@@ -108,6 +198,7 @@ diversity.
 | NOAA CO-OPS station 1615680 (Kahului Harbor) | hourly water level, ft MLLW | 2026-01-01 → 2026-08-31 | 1 h |
 | NOAA CO-OPS station TPT2799 | predicted tide H/L events | 2026-01-01 → 2026-10-08 | events |
 | HCDP station 0131 (Lahaina WTP; 20.8907, −156.6549) | air temp (2 sensors), RH (2 sensors), wind speed, 5-min rainfall, albedo | 2025-12-31 → 2026-10-21 | 5 min |
+| Hawaii DOH Clean Water Branch | Brown Water / beach advisories (issuance–cancellation) | full archive; 2026 used here | events |
 
 The HCDP pull covers the full frame window. The station carries **no
 dedicated solar radiometer** (its PAR channels report no data); surface
@@ -357,6 +448,29 @@ needs per-day or residualized analysis; the notebook computes both.
 
 ![Figure 14: NOAA Kahului water level vs. segmented water fraction and waterline row, split by camera era.](figures/tide_response.png)
 
+### 4.6 Occupancy during Brown Water Advisories
+
+Hawaii DOH Clean Water Branch issues Brown Water Advisories (BWA) when
+storm runoff renders coastal water unsafe. In 2026, two **island-wide** Maui
+advisories covered Kāʻanapali — Mar 16–Apr 2 and Aug 15–24 (28 advisory
+days); the year's other named stretches (Hanakaoʻo, Wahikuli, Lahaina,
+Kihei, north shore) lie outside the camera view.
+
+Water occupancy is compared at the **day** level (15-min frames are heavily
+autocorrelated) against non-advisory days in the **same calendar month**, as
+a ratio with a day-level bootstrap 95% CI. Result: **no detectable
+deterrence** — mean water occupancy on BWA days was 6.8 people/frame vs 7.6
+on same-month baseline days, ratio **0.89 [0.70–1.13]**. Per month: Mar
+0.93, Apr 1.25 (only 2 baseline days — noisy), Aug 0.99. Visitors kept
+entering the water during posted brown-water advisories at statistically
+unchanged rates. This is descriptive, not causal: BWAs are issued *because*
+of the runoff-generating weather that independently suppresses beach use, so
+the baseline days themselves differ in weather mix; if anything the
+comparison is conservative for deterrence. Awareness/behavioral effects
+cannot be separated from weather without survey data.
+
+![Figure 15: Daily water occupancy with the two 2026 island-wide BWA windows shaded; mean occupancy on advisory vs same-month days.](figures/bwa_occupancy.png)
+
 ## 5. Discussion
 
 **The system works because the hard problems were simplified honestly.**
@@ -422,6 +536,39 @@ annotation round on hard/seasonal frames, and (iv) significance-aware time
 series models (e.g., block bootstrap over days) before publishing usage
 elasticities. A Streamlit dashboard built on these products already exists
 (`waterline-detection/Dashboard`) for deployment.
+
+## References
+
+Akyon, F. C., Altinuc, S. O., & Temizel, A. (2022). Slicing Aided Hyper Inference and Fine-tuning for Small Object Detection. 2022 IEEE International Conference on Image Processing (ICIP). https://doi.org/10.1109/ICIP49228.2022.9891932
+Arnold, B. F., Wade, T. J., Benjamin-Chung, J., Schiff, K. C., Griffith, J. F., Dufour, A. P., Weisberg, S. B., & Colford, J. M. (2016). Acute Gastroenteritis and Recreational Water: Highest Burden Among Young US Children. American Journal of Public Health, 106(8), 1407–1412. https://doi.org/10.2105/AJPH.2016.303243
+Balouin, Y., Rey-Valette, H., & Picand, P. (2014). Automatic assessment and analysis of beach attendance using video images at the Lido of Sète beach, France. Ocean & Coastal Management, 103, 34–40. https://doi.org/10.1016/j.ocecoaman.2014.09.020
+Boak, E., & Turner, I. (2005). Shoreline Definition and Detection: A Review. Journal of Coastal Research, 21(4), 688–703.
+Dumitriu, A., Tatui, F., Miron, F., Ionescu, R. T., & Timofte, R. (2023). Rip Current Segmentation: A Novel Benchmark and YOLOv8 Baseline Results. 2023 IEEE/CVF Conference on Computer Vision and Pattern Recognition Workshops (CVPRW) (pp. 4371–4380). IEEE. https://doi.org/10.1109/CVPRW59239.2023.00450
+Epelde, I., Liria, P., Santiago, I., Garnier, R., Uriarte, A., Picón, A., Galdrán, A., Arteche, J. A., Lago, A., Corera, Z., Puga, I., Andueza, J. L., & Lopez, G. (2021). Beach carrying capacity management under Covid-19 era on the Basque Coast by means of automated coastal videometry. Ocean & Coastal Management, 208. https://doi.org/10.1016/j.ocecoaman.2021.105658
+Jocher, G., Qiu, J., Liu, M., Lyu, S., Akyon, F. C., & Kalfaoglu, M. E. (2026). Ultralytics YOLO26: Unified Real-Time End-to-End Vision Models. arXiv:2606.03748 [cs.CV]. https://doi.org/10.48550/arXiv.2606.03748
+Johnston-González, R., Adarraga, E., Coca, O., Correa, M., Hoz, E., Legarda, G., Navarro, J., Ramírez, M., Rozo, A., & Ricaurte-Villota, C. (2024). Artificial intelligence for beach monitoring: An experimental study of beach attendance at El Rodadero, Colombia. Ocean & Coastal Management, 253. https://doi.org/10.1016/j.ocecoaman.2023.106944
+Kammler, M., & Schernewski, G. (2004). Spatial and temporal analysis of beach tourism using webcam and aerial photographs. Coastline Reports, 2, 928–2734.
+Kim, J., Kim, J., Kim, T., Huh, D., & Caires, S. (2020). Wave-Tracking in the Surf Zone Using Coastal Video Imagery with Deep Neural Networks. Atmosphere, 11(3), 304. https://doi.org/10.3390/atmos11030304
+Lansu, E. M., Reijers, V. C., Höfer, S., Luijendijk, A., Rietkerk, M., Wassen, M. J., Lammerts, E. J., & Heide, T. (2024). A global analysis of how human infrastructure squeezes sandy coasts. Nature Communications, 15. https://doi.org/10.1038/s41467-024-48698-8
+Lin, T.-Y., Dollár, P., Girshick, R., He, K., Hariharan, B., & Belongie, S. (2017). Feature Pyramid Networks for Object Detection. arXiv:1612.03144 [cs.CV]. https://doi.org/10.48550/arXiv.1612.03144
+Lippmann, T., & Holman, R. (1989). Quantification of Sand Bar Morphology: A Video Technique Based on Wave Dissipation. Journal of Geophysical Research: Oceans, 94. https://doi.org/10.1029/JC094iC01p00995
+Maji, D., Nagori, S., Mathew, M., & Poddar, D. (2022). YOLO-Pose: Enhancing YOLO for Multi Person Pose Estimation Using Object Keypoint Similarity Loss. arXiv:2207.11883 [cs.CV]. https://doi.org/10.48550/arXiv.2207.11883
+Martínez, M. L., Intralawan, A., Vázquez, G., Pérez-Maqueo, O., Sutton, P., & Landgrave, R. (2007). The coasts of our world: Ecological, economic and social importance. Ecological Economics, 63(2), 254–272. https://doi.org/10.1016/j.ecolecon.2005.11.008
+Morgan, R., Gatell, E., Junyent, R., Micallef, A., Özhan, E., & Williams, A. (2012). An improved user-based beach climate index. Journal of Coastal Conservation, 6, 41–50. https://doi.org/10.1007/s11852-005-0008-2
+Muzammul, M., & Li, X. (2025). Comprehensive review of deep learning-based tiny object detection. Knowledge and Information Systems, 67(5). https://doi.org/10.1007/s10115-024-02214-5
+Nienaber, A., & Imrie-Kuzu, D. (2025). Transformative Change in Coastal Biodiversity Conservation: A Systematic Literature Review of Challenges and Opportunities. Sustainability, 17(24), 11186. https://doi.org/10.3390/su172411186
+Pathak, A., Beynen, P. E., Akiwumi, F. A., & Lindeman, K. C. (2021). Impacts of climate change on the tourism sector of a Small Island Developing State: A case study for the Bahamas. Environmental Development, 37. https://doi.org/10.1016/j.envdev.2020.100641
+Provost, E. J., Butcher, P. A., Colefax, A. P., Coleman, M. A., Curley, B. G., & Kelaher, B. P. (2019). Using drones to quantify beach users across a range of environmental conditions. Journal of Coastal Conservation, 23(3), 633–642. https://doi.org/10.1007/s11852-019-00756-5
+Reimann, L., Vafeidis, A. T., & Honsel, L. E. (2023). Population development as a driver of coastal risk: Current trends and future pathways. Cambridge Prisms: Coastal Futures, 1, e14. https://doi.org/10.1017/cof.2023.15
+Roig Munar, F. X., Martín, J., Rodríguez-Perea, A., Pons, G., Gelabert, B., & Mir-Gual, M. (2012). Risk Assessment of Beach—Dune System Erosion: Beach Management Impacts on the Balearic Islands. Journal of Coastal Research, 28(6), 1488–1499. https://doi.org/10.2112/JCOASTRES-D-11-00153.1
+Ruyck, M. C. D., Soares, A. G., & McLachlan, A. (1997). Social Carrying Capacity as a Management Tool for Sandy Beaches. Journal of Coastal Research, 13(3), 822–830.
+Schlacher, T. A., Schoeman, D. S., Dugan, J. M., Lastra, M. J., Jones, A. P., Scapini, F. L., & McLachlan, A. (2008). Sandy beach ecosystems: Key features, sampling issues, management challenges and climate change impacts. Marine Ecology, 29(1), 70–90. https://doi.org/10.1111/j.1439-0485.2007.00201.x
+Sempere-Tortosa, M., Toledo, I., Marcos-Jorquera, D., Carbonell, D., Gilart-Iglesias, V., & Aragonés, L. (2024). A new occupancy index model based on artificial vision for enhancing beach management. Journal of Environmental Management, 370. https://doi.org/10.1016/j.jenvman.2024.122641
+Silva, R., Martínez, M. L., Tussenbroek, B. I., Guzmán-Rodríguez, L. O., Mendoza, E., & López-Portillo, J. (2020). A Framework to Manage Coastal Squeeze. Sustainability, 12(24), 10610. https://doi.org/10.3390/su122410610
+Xie, E., Wang, W., Yu, Z., Anandkumar, A., Alvarez, J. M., & Luo, P. (2021). SegFormer: Simple and Efficient Design for Semantic Segmentation with Transformers. arXiv:2105.15203 [cs.CV]. https://doi.org/10.48550/arXiv.2105.15203
+Xu, M., Bai, Y., & Ghanem, B. (2019). Missing Labels as Noisy Labels. arXiv:1811.11698 [cs.CV]. https://doi.org/10.48550/arXiv.1811.11698
+Yu, X., Gong, Y., Jiang, N., Ye, Q., & Han, Z. (2019). Scale Match for Tiny Person Detection. arXiv:1905.10503 [cs.CV]. https://doi.org/10.48550/arXiv.1905.10503
+Zou, Z., Chen, K., Shi, Z., Guo, Y., & Ye, J. P. (2023). Object Detection in 20 Years: A Survey. Proceedings of the IEEE, 111(3), 257–276. https://doi.org/10.1109/PROC.2023.3210672
 
 ## Appendix A — Reproduction
 
